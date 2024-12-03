@@ -1,69 +1,74 @@
 const express = require("express");
 const http = require("http");
-const { Server } = require("socket.io");
+const socketIo = require("socket.io");
 
-// Initialize Express and HTTP server
+// Initialize the app
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
+
+// Set up Socket.IO with CORS configuration
+const io = socketIo(server, {
   cors: {
-    origin: "*", // Allow CORS for development; adjust for production as needed
+    origin: "http://localhost:4200", // Frontend address
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type"],
+    credentials: true,
   },
 });
 
-const onlineUsers = new Map(); // Store online users with socket ID and user details
+// Serve static files (optional: for frontend assets)
+app.use(express.static("public"));
 
-// Socket.io connection handler
+// Keep track of connected users
+let users = {};
+
+// When a user connects
+// When a user connects
 io.on("connection", (socket) => {
   console.log(`User connected: ${socket.id}`);
 
-  // Listen for 'join' event to add a user to the online list
+  // When a user joins the chat (send their username)
   socket.on("join", (userName) => {
-    // Store user object with id and name
-    onlineUsers.set(socket.id, { id: socket.id, name: userName });
+    // Add user to online users list
+    users[socket.id] = userName;
+    console.log(`${userName} joined the chat.`);
 
-    // Broadcast updated user list
-    io.emit("updateUserList", Array.from(onlineUsers.values()));
-    console.log(`User joined: ${userName}`);
+    // Broadcast the updated online users list to everyone
+    io.emit(
+      "onlineUsers",
+      Object.entries(users).map(([id, name]) => ({ id, name }))
+    );
   });
 
-  // Listen for signaling messages (like SDP or ICE candidates)
+  // Handle signaling data (offer, answer, ice candidate)
   socket.on("signal", (data) => {
-    const { targetId, signal } = data;
+    const { userId, signalType, signalData } = data;
+    console.log(`Signaling to user: ${userId} with type: ${signalType}`);
 
-    if (onlineUsers.has(targetId)) {
-      // Log the details of the message being sent
-      console.log(`Signal message from ${socket.id} to ${targetId}:`, signal);
-
-      // Send the signal to the target user
-      io.to(targetId).emit("signal", {
-        senderId: socket.id,
-        signal,
-      });
-    } else {
-      console.log(`User with ID ${targetId} not online. Cannot send signal.`);
-    }
+    // Send the signal to the target user
+    io.to(userId).emit("signal", {
+      userId: socket.id, // ID of the user sending the signal
+      signalType,
+      signalData,
+    });
   });
 
-  // Handle disconnection
+  // When a user disconnects
   socket.on("disconnect", () => {
-    const user = onlineUsers.get(socket.id);
-    if (user) {
-      console.log(`User disconnected: ${user.name}`);
-      onlineUsers.delete(socket.id);
-      io.emit("updateUserList", Array.from(onlineUsers.values()));
-    }
+    console.log(`User disconnected: ${socket.id}`);
+    const userName = users[socket.id];
+    delete users[socket.id];
+    // Broadcast updated users list
+    io.emit(
+      "onlineUsers",
+      Object.entries(users).map(([id, name]) => ({ id, name }))
+    );
+    io.emit("userLeft", userName); // Inform others that a user has left
   });
 });
 
-// Endpoint to get the current list of online users
-app.get("/online-users", (req, res) => {
-  // Return the list of online users as an array of objects
-  res.json(Array.from(onlineUsers.values()));
-});
-
-// Start the server
-const PORT = process.env.PORT || 3000;
+// Set up the server to listen on a port
+const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
-  console.log(`Signaling server running on port ${PORT}`);
+  console.log(`Server is running on port ${PORT}`);
 });
