@@ -1,6 +1,7 @@
 const express = require("express");
 const http = require("http");
 const socketIo = require("socket.io");
+require("dotenv").config(); // Load environment variables
 
 // Initialize the app
 const app = express();
